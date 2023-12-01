@@ -1,0 +1,201 @@
+
+
+
+mouse_of_interest = 'test_1';
+
+% MA_max_duration = [5,10,20,40,80,500];
+% MA_min_duration = [0,5,10,20,40,80];
+MA_min_duration = 0;
+MA_max_duration = 10;
+% MA_min_dur = 20;
+% arousal_min_duration = 30;
+arousal_window_size = 50;   %time before and after MA in seconds
+trace_id = ["tracer", "albumin"];
+period_id = ["whole_trace", "influx", "efflux"];   %influx, efflux or whole_trace
+
+
+correlation_reference = ["EEG"];
+EEG_fs = 512;
+power_bands = {[1, 4], [4, 8], [12, 16], [16, 30]}; 
+total_power_band = [1, 30];
+window = hann(round(EEG_fs));
+overlap = round(EEG_fs/5);
+time_before_after = 40;
+
+arousal_onsets = wake_periods_cut(:, 1);
+arousal_durations = wake_periods_cut(:, 2) - wake_periods_cut(:, 1);
+
+[influx_peak,influx_peak_frame] = max(ds_delta465_filt);
+signal_fs_ds = signal_fs/100;
+influx_peak_time = influx_peak_frame / signal_fs_ds;
+influx_start = 10 * influx_peak / 100;    % when tracer level has reached 10% of max
+influx_end = 90 * influx_peak / 100;     % when tracer level has reached 90% of max
+[~,influx_start_frame] = (min(abs(ds_delta465_filt - influx_start)));
+influx_start_time = influx_start_frame / signal_fs_ds;
+[~,influx_end_frame] = (min(abs(ds_delta465_filt - influx_end)));
+influx_end_time = influx_end_frame / signal_fs_ds;
+% efflux_start_time = influx_peak_time + (influx_peak_time-influx_end);
+efflux_start_time = (find(ds_delta465_filt == max(ds_delta465_filt)))/signal_fs_ds;
+efflux_start_frame = efflux_start_time*signal_fs_ds;
+
+
+
+
+
+for trace_index = 1:length(trace_id)
+    trace_of_interest = trace_id(trace_index);
+
+    if strcmp(trace_of_interest, 'tracer')
+        data_trace_of_interest = ds_delta465_filt;
+    elseif strcmp(trace_of_interest, 'albumin')
+        data_trace_of_interest = ds_delta488_filt_conv;
+    end
+
+    for period_index = 1:length(period_id)                % (influx, efflux or whole trace)
+        period_of_interest = period_id(period_index);
+
+        for dur_index=1:length(MA_max_duration)
+            MA_max_dur = MA_max_duration(dur_index);
+            MA_min_dur = MA_min_duration(dur_index);
+
+            microarousal_collector = [];
+            arousal_albumin_collector = [];
+            transition_spectrogram_collector = [];
+            band_power_collector_indv_MA = [];
+            band_power_collector_avg = [];
+            band_power_collector = [];
+            delta_collector = [];
+            theta_collector = [];
+            sigma_collector = [];
+            beta_collector = [];
+
+            for i=1:length(arousal_onsets)
+                arousal_onset = arousal_onsets(i);
+                arousal_duration = arousal_durations(i);
+
+                if isnan(arousal_onset)
+                    continue
+                end
+
+                if strcmp(period_of_interest, 'influx')
+                    if arousal_onset < influx_start_time
+                        continue
+                    end
+                    if arousal_onset > influx_end_time
+                        continue
+                    end
+                elseif strcmp(period_of_interest, 'efflux')
+                    if arousal_onset < efflux_start_time
+                        continue
+                    end
+                end
+
+                arousal_onset_index_FP_frames = signal_fs_ds * arousal_onset;
+                index_window_FP_frames = floor(signal_fs_ds * arousal_window_size);
+                from_index_FP_frames = floor(arousal_onset_index_FP_frames-index_window_FP_frames);
+                to_index_FP_frames = from_index_FP_frames + index_window_FP_frames*2;
+
+                arousal_onset_index_EEG_frames = EEG_fs * arousal_onset;
+                index_window_EEG_frames = floor(EEG_fs * arousal_window_size);
+                from_index_EEG_frames = floor(arousal_onset_index_EEG_frames-index_window_EEG_frames);
+                to_index_EEG_frames = from_index_EEG_frames + index_window_EEG_frames*2;
+
+                if from_index_FP_frames < 1 || to_index_FP_frames > length(data_trace_of_interest)
+                    continue
+                end
+
+                if from_index_FP_frames < time_before_after*signal_fs_ds || to_index_FP_frames > length(data_trace_of_interest)-time_before_after*signal_fs_ds
+                    continue
+                end
+
+                if i == length(arousal_onsets)
+                    continue
+                end
+
+                if i == 1
+                    continue
+                end
+
+
+                % make collector of microarousals
+                if arousal_duration <= MA_max_dur && arousal_duration >= MA_min_dur && arousal_onsets(i+1)-arousal_onset > time_before_after && arousal_onset - arousal_onsets(i-1) > time_before_after
+                    ma = data_trace_of_interest(from_index_FP_frames : to_index_FP_frames);
+                    ma_norm = ma-mean(ma(1:60*signal_fs_ds));
+                    microarousal_collector = [microarousal_collector; ma_norm];
+                    [transition_spectrogram, F, T] = spectrogram(EEG_rawtrace_cut((from_index_EEG_frames):(to_index_EEG_frames)),window,overlap,[],EEG_fs,'yaxis');
+                    transition_spectrogram_collector = cat(3, transition_spectrogram_collector, transition_spectrogram);
+                    mean_transition_spectrogram = mean(log(abs(transition_spectrogram)), 3);
+                    [band_power_collector_indv_MA] = find_power_trace(mean_transition_spectrogram, power_bands, F);
+                    delta_collector = [delta_collector; band_power_collector_indv_MA(1,:)];
+                    theta_collector = [theta_collector; band_power_collector_indv_MA(2,:)];
+                    sigma_collector = [sigma_collector; band_power_collector_indv_MA(3,:)];
+                    beta_collector = [beta_collector; band_power_collector_indv_MA(4,:)];
+                end
+            end
+
+
+            mean_spectrogram = mean(log(abs(transition_spectrogram_collector)), 3);
+
+            MA_time = (1:length(ma))/signal_fs_ds;
+            ma_mean = mean(microarousal_collector);
+            microarousal_albumin_collector_turned = microarousal_collector';
+            MA_transition_time = MA_time - arousal_window_size;
+            spectrogram_time = T-arousal_window_size;
+
+            [trace_delta_correlations, trace_theta_correlations, trace_sigma_correlations, trace_beta_correlations, correlation_collector_delta, lag_axis] = trace_EEG_x_corr(delta_collector, theta_collector, sigma_collector, beta_collector, microarousal_collector, signal_fs_ds, MA_max_dur);
+
+            delta_mean = mean(delta_collector);
+            theta_mean = mean(theta_collector);
+            sigma_mean = mean(sigma_collector);
+            beta_mean = mean(beta_collector);
+  
+
+            trace_of_interest = convertStringsToChars(trace_of_interest);
+            period_of_interest = convertStringsToChars(period_of_interest);
+            MA_max_dur_path = int2str(MA_max_dur);
+            ma_output_path = ['path name where file should be saved'];
+            spectrogram_output_path = ['path name where file should be saved'];
+            ma_delta_power_traces_path = ['path name where file should be saved'];
+            ma_theta_power_traces_path = ['path name where file should be saved'];
+            ma_sigma_power_traces_path = ['path name where file should be saved'];
+            ma_beta_power_traces_path = ['path name where file should be saved'];
+            trace_vs_delta_x_corr_path = ['path name where file should be saved'];
+            trace_vs_theta_x_corr_path = ['path name where file should be saved'];
+            trace_vs_sigma_x_corr_path = ['path name where file should be saved'];
+            trace_vs_beta_x_corr_path = [path name where file should be saved];
+
+%                         save(ma_output_path, 'microarousal_collector');
+%                         save(spectrogram_output_path, 'transition_spectrogram_collector', 'T', 'F');
+%                         save(ma_delta_power_traces_path, 'delta_collector', 'T', 'F')
+%                         save(ma_theta_power_traces_path, 'theta_collector', 'T', 'F')
+%                         save(ma_sigma_power_traces_path, 'sigma_collector', 'T', 'F')
+%                         save(ma_beta_power_traces_path, 'beta_collector', 'T', 'F')
+%                         save(trace_vs_delta_x_corr_path, 'trace_delta_correlations', 'lag_axis')
+%                         save(trace_vs_theta_x_corr_path, 'trace_theta_correlations', 'lag_axis')
+%                         save(trace_vs_sigma_x_corr_path, 'trace_sigma_correlations', 'lag_axis')
+%                         save(trace_vs_beta_x_corr_path, 'trace_beta_correlations', 'lag_axis')
+
+            fig = figure;
+            a = subplot(3,1,1);
+            filtered_mean_spectrogram = imgaussfilt(mean_spectrogram, 2.5);
+            imagesc(spectrogram_time, F, filtered_mean_spectrogram); %plot the log spectrum
+            set(gca,'YDir', 'normal'); % flip the Y Axis so lower frequencies are at the bottom
+            ylim([0, 20]);
+            % h = colorbar;
+            clim([-6.3, -5.1])
+            colormap(gca, 'plasma');
+            title([MA_max_dur])
+            b = subplot(3,1,2);
+            plot(MA_transition_time, ma_mean)
+            xlim([-arousal_window_size, arousal_window_size]);
+            title([trace_of_interest])
+            c = subplot(3, 1, 3);
+            plot(spectrogram_time, delta_mean, 'r')
+            xlim([-arousal_window_size, arousal_window_size]);
+            title("delta power")
+        end
+    end
+end
+
+ma_mean_turned = ma_mean';
+MA_transition_time_turned = MA_transition_time';
