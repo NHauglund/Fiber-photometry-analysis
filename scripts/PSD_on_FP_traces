@@ -1,0 +1,142 @@
+%% PSD on fiber photometry trace
+
+mouse_of_interest = 'mouse_name_1';       % it is a good idea to put zero in front of numbers so all numbers in names have the same number of digits
+trace_of_interest = 'tracer';   %tracer or albumin
+state_of_interest = ['sws'];    %"wake", "sws", "rem"
+period_of_interest = ['whole_trace'];  
+
+output_file_mean = ['path to where file should be saved];
+
+signal_fs_ds = signal_fs/100;
+fs_signal = 1:1:length(ds_delta465_filt);
+
+
+if strcmp(trace_of_interest, 'tracer')
+    Data_trace = ds_delta465_filt_conv;
+elseif strcmp(trace_of_interest, 'albumin')
+    Data_trace = ds_delta488_filt_conv;
+end
+
+
+%Filter vessel diameter signal
+Data_trace_hp_filter = highpass(Data_trace,0.005,signal_fs_ds);
+
+%Make sws_binary_vector allowing marousals of up to 20 seconds
+sec_intruding_state = 21;
+state = abs(1-sws_binary_vector_cut);
+SE = ones(sec_intruding_state,1)';
+state_filled = imclose(sws_binary_vector_cut,SE);
+% sws_binary_vector_no_ma = abs(1-state_filled);
+sws_binary_vector_no_ma = state_filled;
+
+sws_no_ma_onset_vector = [];
+sws_no_ma_offset_vector = [];
+sws_no_ma_periods = [];
+for no_ma_sws = 1:length(sws_binary_vector_no_ma)-1
+    state_index = sws_binary_vector_no_ma(no_ma_sws);
+    if no_ma_sws == 1 && sws_binary_vector_no_ma(1) == 1
+        sws_no_ma_onset_vector = [sws_no_ma_onset_vector, no_ma_sws];
+    elseif sws_binary_vector_no_ma(no_ma_sws+1) - state_index == 1
+        sws_no_ma_onset_vector = [sws_no_ma_onset_vector, no_ma_sws];
+    elseif sws_binary_vector_no_ma(no_ma_sws+1) - state_index == -1
+        sws_no_ma_offset_vector = [sws_no_ma_offset_vector, no_ma_sws];
+    end
+end
+
+if sws_binary_vector_no_ma(length(sws_binary_vector_no_ma)) == 1
+    sws_no_ma_offset_vector = [sws_no_ma_offset_vector, sws_periods_cut(length(sws_periods_cut),2)];
+end
+
+sws_no_ma_onset_vector_turned = sws_no_ma_onset_vector';
+sws_no_ma_offset_vector_turned = sws_no_ma_offset_vector';
+sws_no_ma_periods = [sws_no_ma_onset_vector_turned, sws_no_ma_offset_vector_turned];
+sws_no_ma_durations = sws_no_ma_periods(:,2)-sws_no_ma_periods(:,1);
+
+
+% selects state automatically
+if strcmp(state_of_interest, 'sws')
+    period = sws_no_ma_periods;
+elseif strcmp(state_of_interest, 'wake')
+    period = wake_periods_cut;
+elseif strcmp(state_of_interest, 'rem')
+    period = REM_periods_cut;
+end
+
+period_fs = period*signal_fs_ds +1; % time of periods in frames
+period_cut = period_fs(1:length(period_fs),1:2);
+
+if strcmp(state_of_interest, 'rem')
+period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>200*signal_fs_ds,:); % select period larger than 200 seconds
+else
+    period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>200*signal_fs_ds,:); % select period larger than 200 seconds
+end
+    period_cut_durations = (period_cut(:,2)-period_cut(:,1))/signal_fs_ds;
+
+
+PXX = [];
+PXXlog = [];
+PXX_pk_f = [];
+PXX_pk = [];
+
+NREM_data_collect = [];
+period_duration = [];
+
+
+for i = 1:length(period_cut_cut)
+    period1 = period_cut_cut(i,:);
+    data_period = Data_trace_hp_filter(period1(1):period1(2));
+    period_length = length(data_period);
+    period_duration = [period_duration, period_length/signal_fs_ds];
+
+    %center around 0 with polyfit
+    [p,s,mu] = polyfit((1:numel(data_period))',data_period,5);
+    f_y = polyval(p,(1:numel(data_period))',[],mu);
+    detrend_data = data_period - f_y';        % Detrend data
+
+    [pxx, f] = pwelch(detrend_data, [], [],[0:0.001:0.1], signal_fs_ds, 'power'); %
+    logpxx = 10*log10(pxx);
+    FX{i} = f;
+    [pxx_pk_psd, max_idx] = max(pxx);
+    PXX_pk = [PXX_pk pxx_pk_psd];
+    pxx_pk_f = f(max_idx);
+    PXX_pk_f = [PXX_pk_f pxx_pk_f];
+    PXX = [PXX pxx'];
+end
+
+
+weighted_mean_PXX_sigma = sum(period_duration.*PXX,2)/sum(period_duration); %period duration is used as weights
+
+[PXX_sigma_pk_mean, PXX_sigma_pk_idx] = max(weighted_mean_PXX_sigma);
+PXX_sigma_f_mean = f(PXX_sigma_pk_idx);
+
+prism_psd_sigma = weighted_mean_PXX_sigma;
+prism_freq_sigma = f;
+prism_freq_sigma_turned = prism_freq_sigma';
+
+% normalize to area under the curve
+% Assign the y-value threshold to a variable. Makes is clearer to see how and where it is used,
+% as well as makes is easy to change if needed.
+y_threshold = mean(prism_psd_sigma(50:100));
+% Extract x- and y-data for frequencies in the desired range of 1-6 Hz.
+x = prism_freq_sigma(prism_freq_sigma<0.03); % x-values in the range
+y = prism_psd_sigma(prism_freq_sigma<0.03); % y-values in range & with a threshold adjustment
+% Use trapz function to calculate the area under the curve.
+area_under_curve = trapz(x, y);
+max_point = max(y);
+percentile_curve = prctile(y,90);
+
+prism_psd_sigma_norm = prism_psd_sigma/percentile_curve;
+
+
+% power spectral density plot
+figure
+plot(prism_freq_sigma,prism_psd_sigma_norm)
+xlabel('frequency (Hz)');
+ylabel('PSD');
+
+
+
+% save(output_file_mean, 'prism_freq_sigma', 'prism_psd_sigma_norm');
+
+
+
