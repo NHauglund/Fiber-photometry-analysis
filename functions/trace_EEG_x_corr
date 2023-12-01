@@ -1,0 +1,74 @@
+function [trace_delta_correlations, trace_theta_correlations, trace_sigma_correlations, trace_beta_correlations, correlation_collector_delta, lag_axis] = trace_EEG_x_corr(delta_collector, theta_collector, sigma_collector, beta_collector, microarousal_collector, signal_fs_ds, MA_max_dur);
+
+
+correlation_collector_delta = [];
+correlation_collector_theta = [];
+correlation_collector_sigma = [];
+correlation_collector_beta = [];
+
+trace_delta_correlations = [];
+trace_theta_correlations = [];
+trace_sigma_correlations = [];
+trace_beta_correlations = [];
+
+TimeLag = 60; %time lag in seconds
+TimeLagInSamples = TimeLag * signal_fs_ds ;
+
+
+for i = 1:size(microarousal_collector, 1)
+    MA_trace = microarousal_collector(i,:);
+    delta_band_trace = delta_collector(i,:);
+    theta_band_trace = theta_collector(i,:);
+    sigma_band_trace = sigma_collector(i,:);
+    beta_band_trace = beta_collector(i,:);
+
+    delta_trace_resized = interp1(1:numel(delta_band_trace),delta_band_trace,linspace(1,numel(delta_band_trace),numel(MA_trace)));
+    theta_trace_resized = interp1(1:numel(theta_band_trace),theta_band_trace,linspace(1,numel(theta_band_trace),numel(MA_trace)));
+    sigma_trace_resized = interp1(1:numel(sigma_band_trace),sigma_band_trace,linspace(1,numel(sigma_band_trace),numel(MA_trace)));
+    beta_trace_resized = interp1(1:numel(beta_band_trace),beta_band_trace,linspace(1,numel(beta_band_trace),numel(MA_trace)));
+
+    [delta_cc1,lags] = xcorr(unity(detrend(MA_trace)), unity(detrend(delta_trace_resized)),round(TimeLagInSamples),'unbiased');
+    correlation_collector_delta = [correlation_collector_delta, delta_cc1'];
+
+    [theta_cc1,lags] = xcorr(unity(detrend(MA_trace)), unity(detrend(theta_trace_resized)),round(TimeLagInSamples),'unbiased');
+    correlation_collector_theta = [correlation_collector_theta, theta_cc1'];
+
+    [sigma_cc1,lags] = xcorr(unity(detrend(MA_trace)), unity(detrend(sigma_trace_resized)),round(TimeLagInSamples),'unbiased');
+    correlation_collector_sigma = [correlation_collector_sigma, sigma_cc1'];
+
+    [beta_cc1,lags] = xcorr(unity(detrend(MA_trace)), unity(detrend(beta_trace_resized)),round(TimeLagInSamples),'unbiased');
+    correlation_collector_beta = [correlation_collector_beta, beta_cc1'];
+
+
+
+
+end
+
+mean_delta_correlations = mean(correlation_collector_delta');
+trace_delta_correlations = [trace_delta_correlations,mean_delta_correlations];
+
+mean_theta_correlations = mean(correlation_collector_theta');
+trace_theta_correlations = [trace_theta_correlations,mean_theta_correlations];
+
+mean_sigma_correlations = mean(correlation_collector_sigma');
+trace_sigma_correlations = [trace_sigma_correlations,mean_sigma_correlations];
+
+mean_beta_correlations = mean(correlation_collector_beta');
+trace_beta_correlations = [trace_beta_correlations,mean_beta_correlations];
+
+lag_axis = lags/signal_fs_ds;
+
+figure('Name','xcorrs');
+plot(lag_axis,trace_delta_correlations);
+ylabel('corr. coef.');
+xlabel('time lag (s)');
+hold on;
+plot([0,0],[-1,1],'k'); plot(xlim,[0,0],'k');
+ylim([-1,1]);xlim([-TimeLag,TimeLag]);
+title(["delta," MA_max_dur])
+
+
+end
+
+
+
