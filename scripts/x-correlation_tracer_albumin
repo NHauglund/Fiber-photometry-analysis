@@ -1,0 +1,135 @@
+%% correlations between traces
+
+corr_data = 'tracer';                   % tracer, albumin or eeg
+corr_reference = 'albumin';            % tracer, albumin or eeg
+mouse_of_interest = '01';           % it is a good idea to put zero in front of numbers so all numbers in names have the same number of digits
+state_of_interest = 'sws';          % sws, wake, rem
+experiment = 'ventral';
+
+
+
+%Make sws_binary_vector allowing micro arousals of up to 20 seconds
+sec_intruding_state = 21;
+state = abs(1-sws_binary_vector_cut);
+SE = ones(sec_intruding_state,1)';
+state_filled = imclose(state,SE);
+sws_binary_vector_no_ma = abs(1-state_filled);
+
+sws_no_ma_onset_vector = [];
+sws_no_ma_offset_vector = [];
+sws_no_ma_periods = [];
+for no_ma_sws = 1:length(sws_binary_vector_no_ma)-1
+    state_index = sws_binary_vector_no_ma(no_ma_sws);
+    if sws_binary_vector_no_ma(no_ma_sws+1) - state_index == 1
+        sws_no_ma_onset_vector = [sws_no_ma_onset_vector, no_ma_sws];
+    elseif sws_binary_vector_no_ma(no_ma_sws+1) - state_index == -1
+        sws_no_ma_offset_vector = [sws_no_ma_offset_vector, no_ma_sws];
+    end
+end
+
+if sws_binary_vector_no_ma(length(sws_binary_vector_no_ma)) == 1
+    sws_no_ma_offset_vector = [sws_no_ma_offset_vector, sws_periods_cut(length(sws_periods_cut),2)];
+end
+
+sws_no_ma_onset_vector_turned = sws_no_ma_onset_vector';
+sws_no_ma_offset_vector_turned = sws_no_ma_offset_vector';
+sws_no_ma_periods = [sws_no_ma_periods, sws_no_ma_onset_vector_turned, sws_no_ma_offset_vector_turned];
+sws_no_ma_durations = sws_no_ma_periods(:,2)-sws_no_ma_periods(:,1);
+
+
+
+if strcmp(state_of_interest, 'sws')
+    period = sws_periods_cut;
+elseif strcmp(state_of_interest, 'wake')
+    period = wake_periods_cut;
+elseif strcmp(state_of_interest, 'rem')
+    period = REM_periods_cut;
+end
+
+if strcmp(corr_reference, 'tracer')
+    output_file = ['path to where files shouldbe saved'];
+    output_file_mean = ['path to where files shouldbe saved'];
+elseif strcmp(corr_reference, 'albumin')
+    output_file = ['path to where files shouldbe saved'];
+    output_file_mean = ['path to where files shouldbe saved'];
+end
+
+signal_fs_ds = signal_fs/100;   % downsample signal sampling rate so it matches the downsampled traces
+period_fs = period*signal_fs_ds+1; % time of periods in frames
+
+
+    period_cut = period_fs;
+    if strcmp(state_of_interest, 'sws')
+        period_cut = period_fs(period_fs(:,2)<(length(ds_delta465_filt)),:);
+        period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>(100*signal_fs_ds),:); % select period larger than 100 seconds
+    elseif strcmp(state_of_interest, 'wake')
+        period_cut = period_fs(period_fs(:,2)<(length(ds_delta465_filt)),:);
+        period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>(100*signal_fs_ds),:); % select period larger than 100 seconds
+    elseif strcmp(state_of_interest, 'rem')
+        period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>(30*signal_fs_ds),:); % select period larger than 200 seconds
+
+
+if strcmp(state_of_interest, 'sws')
+    TimeLag = 40;
+elseif strcmp(state_of_interest, 'wake')
+    TimeLag = 40;
+elseif strcmp(state_of_interest, 'rem')
+    TimeLag = 40;
+end
+
+TimeLagInSamples = TimeLag * signal_fs_ds ;
+
+
+correlation_collector = [];
+for i = 1:length(period_cut_cut)
+    period1 = period_cut_cut(i,:);
+    tracer_period = ds_delta465_filt_conv(period1(1):period1(2));
+    albumin_period = ds_delta488_filt_conv(period1(1):period1(2));
+
+    if strcmp(corr_data, 'tracer')
+        Data = tracer_period;
+    elseif strcmp(corr_data, 'albumin')
+        Data = albumin_period;
+    end
+
+    if strcmp(corr_reference, 'tracer')
+        Reference = tracer_period;
+    elseif strcmp(corr_reference, 'albumin')
+        Reference = albumin_period;
+    end
+
+    [cc1,lags] = xcorr(unity(detrend(Data)), unity(detrend(Reference)),round(TimeLagInSamples),'unbiased');
+    correlation_collector = [correlation_collector, cc1'];
+
+
+end
+
+mean_correlations = mean(correlation_collector,2);
+
+figure('Name','xcorrs');
+subplot(2,1,1);
+lag_axis = lags/signal_fs_ds;
+plot(lag_axis,correlation_collector);
+ylabel('corr. coef.');
+xlabel('time lag (s)');
+hold on;
+plot([0,0],[-1,1],'k'); plot(xlim,[0,0],'k');
+ylim([-1,1]);xlim([-TimeLag,TimeLag]);
+title('cross correlation');
+
+subplot(2,1,2);
+plot(lag_axis,mean_correlations);
+ylabel('corr. coef.');
+xlabel('time lag (s)');
+hold on;
+title('cross correlation');
+[mval, mi] = min(mean_correlations);
+lag_time = lag_axis(mi);
+
+
+save(output_file, 'lag_axis', 'correlation_collector');
+save(output_file_mean, 'lag_axis', 'mean_correlations');
+
+end
+
+
