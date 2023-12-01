@@ -1,0 +1,254 @@
+
+%% EEG power spectrum analysis
+
+% sec_signal = fs_signal/signal_fs;
+window = 5; %sec. 1 for 30 sec
+sampling_frequency = 512;
+
+power_bands = {[1, 4], [4, 8], [12, 16], [16, 30]}; % delta was 0.2 before
+total_power_band = [1, 30];
+frw = 0:0.2:30;
+
+Data_EEG = EEG_rawtrace_cut;
+
+frq = sampling_frequency;
+
+Data_EEG = rmmissing(Data_EEG);
+
+[transition_spectrogram, F, T] = spectrogram(Data_EEG,round(frq*window),[],frw,frq,'yaxis');
+mean_spectrogram = log(abs(transition_spectrogram));
+time_spectrogram_zero = T;
+filtered_mean_spectrogram = imgaussfilt(mean_spectrogram, 2);
+EEG_trace_plot = interp1(1:numel(Data_EEG),Data_EEG,linspace(1,numel(Data_EEG),numel(time_spectrogram_zero)));
+
+specto_fs = length(T)/T(end);
+
+figure()
+a = subplot(4, 1, 1);
+plot(time_spectrogram_zero,EEG_trace_plot)
+
+b = subplot(4, 1, 2);
+imagesc(time_spectrogram_zero, F, filtered_mean_spectrogram); %plot the log spectrum
+set(gca,'YDir', 'normal'); % flip the Y Axis so lower frequencies are at the bottom
+ylim([0, 30]);
+caxis([-6.7, -4])
+colormap(gca, 'plasma');
+hold on
+for band_i = 1:length(power_bands)
+    plot([-295, -295], power_bands{band_i}, 'LineWidth', 5)
+end
+
+c = subplot(4, 1, 3);
+band_power_collector = [T];
+
+normalization_factor = mean(mean(mean_spectrogram(find(F==total_power_band(1)):find(F==total_power_band(2)), 1:find(T==round(2000)))));
+
+for band_i = 1:length(power_bands)
+    power_band = power_bands{band_i};
+    power_trace = mean(mean_spectrogram(find(F==power_band(1)):find(F==power_band(2)), :), 1);
+    normalized_power_trace = power_trace;
+    band_power_collector = [band_power_collector; normalized_power_trace];
+    plot(time_spectrogram_zero, normalized_power_trace)
+    hold on
+end
+
+
+d = subplot(4, 1, 4);
+delta = band_power_collector(2,:);
+theta = band_power_collector(3,:);
+sigma = band_power_collector(4,:);
+beta = band_power_collector(5,:);
+theta_delta_ratio = theta./delta;
+plot(time_spectrogram_zero, delta, 'r')
+hold on;
+plot(time_spectrogram_zero, sigma, 'b')
+legend('delta','sigma')
+title ('delta and sigma')
+
+linkaxes([a,b,c,d],'x');
+
+
+
+
+
+
+%% Correlate with EEG power bands
+
+corr_reference = 'eeg';             % tracer, reference or eeg
+mouse_of_interest = 'mouse_01';       % it is a good idea to put zero in front of numbers so all numbers in names have the same number of digits
+probe_placement = 'ventral';
+corr_data_id = ["albumin"];    %"albumin" or "tracer"
+state_of_interest_id = ["sws"];      % "wake", "rem" or "sws"
+power_band_of_interest_id = ["delta", "theta", "beta", "sigma"];
+
+
+
+for corr_index = 1:length(corr_data_id)
+    corr_data_string = corr_data_id(corr_index);
+
+    for state_index = 1:length(state_of_interest_id)
+        state_of_interest_string = state_of_interest_id(state_index);
+
+        for power_band_index = 1:length(power_band_of_interest_id)
+            power_band_of_interest_string = power_band_of_interest_id(power_band_index);
+
+            corr_data = convertStringsToChars(corr_data_string);
+            state_of_interest = convertStringsToChars(state_of_interest_string);
+            power_band_of_interest = convertStringsToChars(power_band_of_interest_string);
+
+            % selects state automatically
+            if strcmp(state_of_interest, 'sws')
+                period = sws_periods_cut;
+            elseif strcmp(state_of_interest, 'wake')
+                period = wake_periods_cut;
+            elseif strcmp(state_of_interest, 'rem')
+                period = REM_periods_cut;
+            end
+
+            % selects power band automatically
+            if strcmp(power_band_of_interest, 'delta')
+                EEG = delta;
+            elseif strcmp(power_band_of_interest, 'theta')
+                EEG = theta;
+            elseif strcmp(power_band_of_interest, 'beta')
+                EEG = beta;
+            elseif strcmp(power_band_of_interest, 'sigma')
+                EEG = sigma;
+            end
+
+            % selects location to save file and generates filename
+            if strcmp(corr_reference, 'tracer')
+                output_file_mean = ['path for where file should be saved'];
+            elseif strcmp(corr_reference, 'albumin')
+                output_file_mean = ['path for where file should be saved'];
+            elseif strcmp(corr_reference, 'eeg')
+                output_file_mean = ['path for where file should be saved'];
+            end
+
+
+
+            d2 = interp1(1:numel(EEG),EEG,linspace(1,numel(EEG),numel(ds_delta465_filt)));
+
+            signal_fs_ds = signal_fs/100;   % downsample signal sampling rate so it matches the downsampled traces
+
+            period_fs = period*signal_fs_ds +1; % time of periods in frames
+
+            % selects which periods to make correlations on
+            if strcmp(probe_placement, 'cortex')
+                period_cut = period_fs;
+                if strcmp(state_of_interest, 'sws')
+                    period_cut = period_fs(period_fs(:,2)<(length(ds_delta465_filt_conv)),:);
+                    period_cuto = period_cut(100:end,1:2); % select only period after the 60 first periods to only have period where tracer is high
+                    period_cut_cut = period_cuto(period_cuto(:,2)-period_cuto(:,1)>100*signal_fs_ds,:); % select period larger than 200 seconds
+                elseif strcmp(state_of_interest, 'wake')
+                    period_cut = period_fs(period_fs(:,2)<(length(ds_delta465_filt_conv)),:);
+                    period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>100*signal_fs_ds,:); % select period larger than 100 seconds
+                elseif strcmp(state_of_interest, 'rem')
+                    period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>30*signal_fs_ds,:); % select period larger than 30 seconds
+                end
+            elseif strcmp(probe_placement, 'ventral')
+                if strcmp(state_of_interest, 'sws')
+                    period_cut = period_fs(30:end,1:2);
+                    period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>100*signal_fs_ds,:); % select period larger than 100 seconds
+                elseif strcmp(state_of_interest, 'wake')
+                    period_cut = period_fs(30:end,1:2);
+                    period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>100*signal_fs_ds,:); % select period larger than 100 seconds
+                elseif strcmp(state_of_interest, 'rem')
+                    period_cut = period_fs(5:end,1:2); % for REM period to only get periods where tracer is high
+                    period_cut_cut = period_cut(period_cut(:,2)-period_cut(:,1)>30*signal_fs_ds,:); % select period larger than 30 seconds
+                end
+            end
+
+            % selects time lag automatically (should match the length of the shortest
+            % period. If the shortest period is 200 seconds, it is good to choose a
+            % time lag that is shorter, like 100 seconds, otherwise the beginning and
+            % end of the period will not have enough to be correlated to.
+            if strcmp(state_of_interest, 'sws')
+                TimeLag = 40;
+            elseif strcmp(state_of_interest, 'wake')
+                TimeLag = 40;
+            elseif strcmp(state_of_interest, 'rem')
+                TimeLag = 30;
+            end
+
+            TimeLagInSamples = TimeLag * signal_fs_ds ;
+
+
+            % loop through all periods and make a correlation for each period. All
+            % correlations are saved in the correlation collector.
+            correlation_collector = [];
+            I_collector = [];
+            for i = 1:length(period_cut_cut)
+                period1 = period_cut_cut(i,:);
+                tracer_period = ds_delta465_filt_conv(period1(1):period1(2));
+                albumin_period = ds_delta488_filt_conv(period1(1):period1(2));
+                eeg_period = d2(period1(1):period1(2));
+
+
+                if strcmp(corr_data, 'tracer')
+                    Data = tracer_period;
+                elseif strcmp(corr_data, 'albumin')
+                    Data = albumin_period;
+                elseif strcmp(corr_data, 'eeg')
+                    Data = eeg_period;
+                end
+
+                if strcmp(corr_reference, 'tracer')
+                    Reference = tracer_period;
+                elseif strcmp(corr_reference, 'albumin')
+                    Reference = albumin_period;
+                elseif strcmp(corr_reference, 'eeg')
+                    Reference = eeg_period;
+                end
+
+                [cc1,lags] = xcorr(unity(detrend(Data)), unity(detrend(Reference)),round(TimeLagInSamples),'unbiased');
+                correlation_collector = [correlation_collector, cc1'];
+                [~,I] = max(abs(cc1));
+                I_collector = [I_collector, I];
+
+
+                % plot(cc1, "color", [i/length(period_cut_cut), 0, 0]);
+                % hold on;
+
+
+            end
+
+            % calculate the mean of all correlations in the correlation collector.
+            mean_correlations = mean(correlation_collector,2);
+            mean_I = mean(I_collector, 2);
+
+            lag_axis = lags/signal_fs_ds;
+
+            figure('Name','xcorrs');
+            subplot(2,1,1);
+            plot(lag_axis,correlation_collector);
+            ylabel('corr. coef.');
+            xlabel('time lag (s)');
+            hold on;
+            plot([0,0],[-1,1],'k'); plot(xlim,[0,0],'k');
+            ylim([-1,1]);xlim([-TimeLag,TimeLag]);
+            title('cross correlation');
+
+            subplot(2,1,2);
+            plot(lag_axis, mean_correlations);
+            ylabel('corr. coef.');
+            xlabel('strange numbers');
+            hold on;
+            title('cross correlation');
+
+             save(output_file_mean, 'lag_axis', 'mean_correlations');
+
+            lag_axis_turned_ = lag_axis';
+            if abs(min(mean_correlations)) > abs(max(mean_correlations))
+                [mval, mi] = min(mean_correlations);
+                lag_time = lag_axis(mi);
+            else
+                [mval, mi] = max(mean_correlations);
+                lag_time = lag_axis(mi);
+            end
+
+        end
+    end
+end
+
+
