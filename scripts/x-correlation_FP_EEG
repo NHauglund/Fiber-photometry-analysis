@@ -239,14 +239,7 @@ for corr_index = 1:length(corr_data_id)
              save(output_file_mean, 'lag_axis', 'mean_correlations');
 
             lag_axis_turned_ = lag_axis';
-            if abs(min(mean_correlations)) > abs(max(mean_correlations))
-                [mval, mi] = min(mean_correlations);
-                lag_time = lag_axis(mi);
-            else
-                [mval, mi] = max(mean_correlations);
-                lag_time = lag_axis(mi);
-            end
-
+        
         end
     end
 end
