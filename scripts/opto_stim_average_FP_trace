@@ -1,4 +1,4 @@
-
+% Use this script on fiber photometry and optogenetic data. First run the "Open_FP_and_EEG" script to get parameters.
 
 mouse_of_interest = 'opto_386';
 
