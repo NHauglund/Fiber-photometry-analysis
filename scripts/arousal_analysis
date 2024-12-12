@@ -162,7 +162,7 @@ for trace_index = 1:length(trace_id)
             trace_vs_delta_x_corr_path = ['path name where file should be saved'];
             trace_vs_theta_x_corr_path = ['path name where file should be saved'];
             trace_vs_sigma_x_corr_path = ['path name where file should be saved'];
-            trace_vs_beta_x_corr_path = [path name where file should be saved];
+            trace_vs_beta_x_corr_path = ['path name where file should be saved'];
 
 %                         save(ma_output_path, 'microarousal_collector');
 %                         save(spectrogram_output_path, 'transition_spectrogram_collector', 'T', 'F');
