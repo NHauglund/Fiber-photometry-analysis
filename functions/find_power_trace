@@ -1,0 +1,12 @@
+function [band_power_collector] = find_power_trace(transition_spectrogram, power_bands, F)
+
+band_power_collector = [];
+
+                    for band_i = 1:length(power_bands)
+                        power_band = power_bands{band_i};
+                        power_trace = mean(log(abs(transition_spectrogram(find(F==power_band(1)):find(F==power_band(2)), :))), 1);
+                        band_power_collector = [band_power_collector; power_trace];
+                    end
+                    
+
+end
